@@ -29,32 +29,32 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}
       >
         <nav className="border-b bg-card shadow-sm">
-          <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3 sm:gap-6">
-            <Link href="/" className="font-bold text-lg tracking-tight">
+          <div className="max-w-screen-2xl mx-auto px-3 py-2 sm:px-4 sm:py-0 sm:h-14 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+            <Link href="/" className="font-bold text-base sm:text-lg tracking-tight whitespace-nowrap self-start sm:self-auto">
               就活スケジュール管理
             </Link>
-            <div className="flex items-center gap-1">
+            <div className="grid w-full grid-cols-4 gap-1 sm:flex sm:w-auto sm:items-center">
               <Link
                 href="/"
-                className="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="px-1 sm:px-3 py-1.5 rounded-md text-center text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors whitespace-nowrap"
               >
                 ダッシュボード
               </Link>
               <Link
                 href="/calendar"
-                className="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="px-1 sm:px-3 py-1.5 rounded-md text-center text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors whitespace-nowrap"
               >
                 カレンダー
               </Link>
               <Link
                 href="/companies"
-                className="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="px-1 sm:px-3 py-1.5 rounded-md text-center text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors whitespace-nowrap"
               >
                 企業一覧
               </Link>
               <Link
                 href="/settings"
-                className="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="px-1 sm:px-3 py-1.5 rounded-md text-center text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors whitespace-nowrap"
               >
                 設定
               </Link>

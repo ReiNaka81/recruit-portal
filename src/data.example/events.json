@@ -6,8 +6,10 @@
     "type": "deadline",
     "start": "2026-06-01",
     "end": "2026-06-01",
-    "status": "pending",
-    "note": ""
+    "state": "todo",
+    "note": "",
+    "processId": "proc-sample-bank-summer",
+    "stepId": "step-sample-bank-entry"
   },
   {
     "id": "sample-dl-2",
@@ -16,7 +18,7 @@
     "type": "deadline",
     "start": "2026-06-15",
     "end": "2026-06-15",
-    "status": "pending",
+    "state": "todo",
     "note": ""
   },
   {
@@ -26,8 +28,10 @@
     "type": "internship",
     "start": "2026-08-03",
     "end": "2026-08-07",
-    "status": "pending",
-    "note": ""
+    "state": "scheduled",
+    "note": "",
+    "processId": "proc-sample-bank-summer",
+    "stepId": "step-sample-bank-internship"
   },
   {
     "id": "sample-int-2",
@@ -36,7 +40,7 @@
     "type": "internship",
     "start": "2026-08-17",
     "end": "2026-08-21",
-    "status": "pending",
+    "state": "scheduled",
     "note": ""
   }
 ]

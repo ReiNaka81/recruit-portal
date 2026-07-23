@@ -1,6 +1,7 @@
-import { getCompanies, getEvents, getCategories } from '@/lib/data'
+import { getCompanies, getEvents, getCategories, getProcesses } from '@/lib/data'
 import CalendarClient from '@/components/CalendarClient'
 import { Company, InternEvent } from '@/types'
+import { getTrackingState } from '@/lib/status'
 
 interface CalendarEvent {
   id: string
@@ -32,15 +33,16 @@ export default function CalendarPage() {
   const companies = getCompanies()
   const events = getEvents()
   const categories = getCategories()
+  const processes = getProcesses()
 
-  const activeCompanies = companies.filter(c => !c.suspended)
+  const activeCompanies = companies.filter(c => getTrackingState(c) === 'active')
   const companyMap = Object.fromEntries(companies.map(c => [c.id, c]))
 
   const calendarEvents: CalendarEvent[] = events
     .map(event => {
       const company = companyMap[event.companyId]
       if (!company) return null
-      if (company.suspended) return null
+      if (getTrackingState(company) !== 'active') return null
       const isDeadline = event.type === 'deadline'
       const allDay = isDeadline ? true : !event.start.includes('T')
       const actualEnd = isDeadline ? event.start : event.end
@@ -58,5 +60,12 @@ export default function CalendarPage() {
     })
     .filter((e): e is CalendarEvent => e !== null)
 
-  return <CalendarClient events={calendarEvents} companies={activeCompanies} categories={categories} />
+  return (
+    <CalendarClient
+      events={calendarEvents}
+      companies={activeCompanies}
+      categories={categories}
+      processes={processes}
+    />
+  )
 }

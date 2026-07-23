@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "gen-key": "node scripts/gen-key.mjs",
-    "encrypt-existing": "node scripts/encrypt-existing.mjs"
+    "encrypt-existing": "node scripts/encrypt-existing.mjs",
+    "migrate-status-model": "node scripts/migrate-status-model.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

@@ -8,8 +8,15 @@ import interactionPlugin from '@fullcalendar/interaction/index.js'
 import listPlugin from '@fullcalendar/list/index.js'
 import { EventClickArg, EventContentArg } from '@fullcalendar/core/index.js'
 import { DateClickArg } from '@fullcalendar/interaction/index.js'
-import { Company, CategoryDef, EventType, InternEvent, Status } from '@/types'
-import { addEvent, updateEventStatus, deleteEvent, updateEvent } from '@/lib/actions'
+import {
+  CalendarItemState,
+  Company,
+  CategoryDef,
+  EventType,
+  InternEvent,
+  SelectionProcess,
+} from '@/types'
+import { addEvent, updateEventState, deleteEvent, updateEvent } from '@/lib/actions'
 import {
   Dialog,
   DialogContent,
@@ -50,15 +57,14 @@ interface Props {
   events: CalendarEvent[]
   companies: Company[]
   categories: CategoryDef[]
+  processes: SelectionProcess[]
 }
 
-const STATUS_LABELS: Record<Status, string> = {
-  pending: '未対応',
-  applied: '応募済',
-  in_progress: '選考中',
-  passed: '通過',
-  rejected: '不合格',
+const STATE_LABELS: Record<CalendarItemState, string> = {
+  todo: '要対応',
+  scheduled: '予定',
   done: '完了',
+  cancelled: '中止',
 }
 
 
@@ -134,7 +140,9 @@ const EMPTY_FORM = {
   start: '',
   end: '',
   allDay: false,
-  status: 'pending' as Status,
+  state: 'todo' as CalendarItemState,
+  processId: '',
+  stepId: '',
   note: '',
 }
 
@@ -157,7 +165,7 @@ const formatEventDate = (s: string) => {
   })
 }
 
-export default function CalendarClient({ events, companies, categories }: Props) {
+export default function CalendarClient({ events, companies, categories, processes }: Props) {
   const categoryLabels = Object.fromEntries(categories.map(c => [c.id, c.label]))
   const router = useRouter()
   const calendarRef = useRef<FullCalendar>(null)
@@ -165,7 +173,7 @@ export default function CalendarClient({ events, companies, categories }: Props)
     event: InternEvent
     company: Company
   } | null>(null)
-  const [currentStatus, setCurrentStatus] = useState<Status>('pending')
+  const [currentState, setCurrentState] = useState<CalendarItemState>('todo')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -214,8 +222,10 @@ export default function CalendarClient({ events, companies, categories }: Props)
         type: form.type,
         start: form.start,
         end: form.end || form.start,
-        status: form.status,
+        state: form.state,
         note: form.note,
+        processId: form.processId || undefined,
+        stepId: form.stepId || undefined,
       })
       setAddOpen(false)
       setForm(EMPTY_FORM)
@@ -231,17 +241,17 @@ export default function CalendarClient({ events, companies, categories }: Props)
       company: Company
     }
     setSelectedEvent({ event: internEvent, company })
-    setCurrentStatus(internEvent.status)
+    setCurrentState(internEvent.state)
     setEditMode(false)
   }, [])
 
-  const handleStatusSave = async () => {
+  const handleStateSave = async () => {
     if (!selectedEvent) return
     setSaving(true)
     try {
-      await updateEventStatus(selectedEvent.event.id, currentStatus)
+      await updateEventState(selectedEvent.event.id, currentState)
       setSelectedEvent(prev =>
-        prev ? { ...prev, event: { ...prev.event, status: currentStatus } } : null
+        prev ? { ...prev, event: { ...prev.event, state: currentState } } : null
       )
     } finally {
       setSaving(false)
@@ -281,10 +291,10 @@ export default function CalendarClient({ events, companies, categories }: Props)
         type: editForm.type,
         start: editForm.start,
         end: editForm.end || editForm.start,
-        status: currentStatus,
+        state: currentState,
       })
       setSelectedEvent(prev =>
-        prev ? { ...prev, event: { ...prev.event, ...editForm, end: editForm.end || editForm.start, status: currentStatus } } : null
+        prev ? { ...prev, event: { ...prev.event, ...editForm, end: editForm.end || editForm.start, state: currentState } } : null
       )
       setEditMode(false)
       router.refresh()
@@ -310,7 +320,11 @@ export default function CalendarClient({ events, companies, categories }: Props)
   }
 
   const upcomingDeadlines = visibleEvents
-    .filter(e => e.extendedProps.event.type === 'deadline' && new Date(e.extendedProps.event.start) >= today)
+    .filter(e =>
+      e.extendedProps.event.type === 'deadline' &&
+      e.extendedProps.event.state === 'todo' &&
+      new Date(e.extendedProps.event.start) >= today
+    )
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
 
   // Detect overlapping internships
@@ -632,13 +646,13 @@ export default function CalendarClient({ events, companies, categories }: Props)
                   )}
 
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">ステータス</label>
-                    <Select value={currentStatus} onValueChange={(v) => setCurrentStatus(v as Status)}>
+                    <label className="text-sm font-medium text-foreground">予定の状態</label>
+                    <Select value={currentState} onValueChange={(v) => setCurrentState(v as CalendarItemState)}>
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue>{STATE_LABELS[currentState]}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([val, label]) => (
+                        {(Object.entries(STATE_LABELS) as [CalendarItemState, string][]).map(([val, label]) => (
                           <SelectItem key={val} value={val}>{label}</SelectItem>
                         ))}
                       </SelectContent>
@@ -670,7 +684,7 @@ export default function CalendarClient({ events, companies, categories }: Props)
                         <Button size="sm" variant="destructive" onClick={handleDelete} disabled={deleting || saving}>
                           {deleting ? '削除中...' : '削除'}
                         </Button>
-                        <Button size="sm" onClick={handleStatusSave} disabled={saving || deleting}>
+                        <Button size="sm" onClick={handleStateSave} disabled={saving || deleting}>
                           {saving ? '保存中...' : '保存'}
                         </Button>
                       </div>
@@ -693,7 +707,15 @@ export default function CalendarClient({ events, companies, categories }: Props)
           <div className="space-y-3 pt-1">
             <div className="space-y-1">
               <Label className="text-xs">企業</Label>
-              <Select value={form.companyId} onValueChange={v => setForm(f => ({ ...f, companyId: v ?? '' }))}>
+              <Select
+                value={form.companyId}
+                onValueChange={v => setForm(f => ({
+                  ...f,
+                  companyId: v ?? '',
+                  processId: '',
+                  stepId: '',
+                }))}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="選択..." />
                 </SelectTrigger>
@@ -718,7 +740,7 @@ export default function CalendarClient({ events, companies, categories }: Props)
               <Label className="text-xs">種別</Label>
               <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v as EventType }))}>
                 <SelectTrigger className="w-full">
-                  <SelectValue />
+                  <SelectValue>{STATE_LABELS[form.state]}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {(Object.entries(TYPE_LABELS) as [EventType, string][]).map(([val, label]) => (
@@ -768,18 +790,70 @@ export default function CalendarClient({ events, companies, categories }: Props)
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs">ステータス</Label>
-              <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as Status }))}>
+              <Label className="text-xs">予定の状態</Label>
+              <Select value={form.state} onValueChange={v => setForm(f => ({ ...f, state: v as CalendarItemState }))}>
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([val, label]) => (
+                  {(Object.entries(STATE_LABELS) as [CalendarItemState, string][]).map(([val, label]) => (
                     <SelectItem key={val} value={val}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {processes.some(process => process.companyId === form.companyId) && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">選考プロセス</Label>
+                  <Select
+                    value={form.processId}
+                    onValueChange={value => setForm(current => ({
+                      ...current,
+                      processId: value ?? '',
+                      stepId: '',
+                    }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="紐づけなし">
+                        {processes.find(process => process.id === form.processId)?.name}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {processes
+                        .filter(process => process.companyId === form.companyId)
+                        .map(process => (
+                          <SelectItem key={process.id} value={process.id}>{process.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">選考ステップ</Label>
+                  <Select
+                    value={form.stepId}
+                    onValueChange={value => setForm(current => ({ ...current, stepId: value ?? '' }))}
+                    disabled={!form.processId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="紐づけなし">
+                        {processes
+                          .find(process => process.id === form.processId)
+                          ?.steps.find(step => step.id === form.stepId)?.label}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {processes
+                        .find(process => process.id === form.processId)
+                        ?.steps.map(step => (
+                          <SelectItem key={step.id} value={step.id}>{step.label}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)} disabled={adding}>
