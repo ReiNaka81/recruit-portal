@@ -1,10 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
-
-const recruitRoot = process.env.RECRUIT_ROOT
-  ? path.resolve(process.env.RECRUIT_ROOT)
-  : path.resolve(process.cwd(), '..')
+import { resolveRegisteredCompanyFile } from '@/lib/data'
 
 const MIME: Record<string, string> = {
   pdf: 'application/pdf',
@@ -26,9 +23,9 @@ const MIME: Record<string, string> = {
   doc: 'application/msword',
 }
 
-// ブラウザ内で表示できる拡張子 (inline)。それ以外はダウンロード (attachment)
+// スクリプトを実行し得る HTML / SVG は必ずダウンロードにする。
 const INLINE_EXTS = new Set([
-  'pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'txt', 'md', 'html', 'json',
+  'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'json',
 ])
 
 export async function GET(req: NextRequest) {
@@ -38,11 +35,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'path required' }, { status: 400 })
   }
 
-  // path traversal 防止: 絶対パス化したものが recruitRoot 配下であることを検証
-  const abs = path.resolve(recruitRoot, relative)
-  const rootWithSep = recruitRoot.endsWith(path.sep) ? recruitRoot : recruitRoot + path.sep
-  if (!abs.startsWith(rootWithSep)) {
-    return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
+  const abs = resolveRegisteredCompanyFile(relative)
+  if (!abs) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
   let stat: fs.Stats
@@ -69,6 +64,9 @@ export async function GET(req: NextRequest) {
       'Content-Disposition': disposition,
       'Content-Length': String(stat.size),
       'Cache-Control': 'no-cache',
+      'Content-Security-Policy': "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
     },
   })
 }

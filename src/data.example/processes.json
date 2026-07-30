@@ -1,0 +1,39 @@
+[
+  {
+    "id": "proc-sample-bank-summer",
+    "companyId": "sample-bank",
+    "name": "サマーインターン",
+    "kind": "internship",
+    "status": "active",
+    "result": "none",
+    "currentStepId": "step-sample-bank-entry",
+    "steps": [
+      {
+        "id": "step-sample-bank-entry",
+        "label": "ES提出",
+        "kind": "document",
+        "state": "action_required",
+        "result": "none",
+        "order": 0
+      },
+      {
+        "id": "step-sample-bank-interview",
+        "label": "面接",
+        "kind": "interview",
+        "state": "not_started",
+        "result": "none",
+        "order": 1
+      },
+      {
+        "id": "step-sample-bank-internship",
+        "label": "インターン参加",
+        "kind": "internship",
+        "state": "not_started",
+        "result": "none",
+        "order": 2
+      }
+    ],
+    "createdAt": "2026-05-01T00:00:00.000Z",
+    "updatedAt": "2026-05-01T00:00:00.000Z"
+  }
+]

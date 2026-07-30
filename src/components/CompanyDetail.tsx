@@ -1,12 +1,32 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  Pencil,
+  Star,
+  Trash2,
+} from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -14,650 +34,626 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Trash2, Pencil, Copy, Check, Eye, EyeOff, PauseCircle, PlayCircle, ExternalLink } from 'lucide-react'
-import { Company, InternEvent, Status } from '@/types'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  addSelectionProcess,
+  addSelectionStep,
+  deleteCompany,
+  deleteEvent,
+  deleteSelectionProcess,
+  deleteSelectionStep,
+  moveSelectionStep,
+  reorderSelectionStep,
+  setCurrentStep,
+  setPrimaryProcess,
+  updateCompanyAccount,
+  updateCompanyNotes,
+  updateCompanyTrackingState,
+  updateEventState,
+  updateSelectionProcess,
+  updateSelectionStep,
+} from '@/lib/actions'
 import { CompanyFile } from '@/lib/data'
-import { updateCompanyNotes, updateEventStatus, deleteEvent, updateEvent, updateCompanyAccount, deleteCompany, toggleCompanySuspended } from '@/lib/actions'
-import { Input } from '@/components/ui/input'
+import {
+  PROCESS_KIND_META,
+  PROCESS_RESULT_META,
+  PROCESS_STATUS_META,
+  STEP_KIND_META,
+  STEP_RESULT_META,
+  STEP_STATE_META,
+  TRACKING_STATE_META,
+  getTrackingState,
+} from '@/lib/status'
+import {
+  CalendarItemState,
+  Company,
+  InternEvent,
+  ProcessKind,
+  ProcessResult,
+  ProcessStatus,
+  SelectionProcess,
+  StepKind,
+  StepResult,
+  StepState,
+  TrackingState,
+} from '@/types'
 
 const FILE_ICONS: Record<string, string> = {
-  md: '📝', pdf: '📄', xlsx: '📊', xls: '📊', pptx: '📊', ppt: '📊',
+  md: '📝',
+  pdf: '📄',
+  xlsx: '📊',
+  xls: '📊',
+  pptx: '📊',
+  ppt: '📊',
 }
 
-interface Props {
-  company: Company
-  events: InternEvent[]
-  files: CompanyFile[]
+const CALENDAR_STATE_META: Record<CalendarItemState, { label: string }> = {
+  todo: { label: '要対応' },
+  scheduled: { label: '予定' },
+  done: { label: '完了' },
+  cancelled: { label: '中止' },
 }
 
-const STATUS_LABELS: Record<Status, string> = {
-  pending: '未対応',
-  applied: '応募済',
-  in_progress: '選考中',
-  passed: '通過',
-  rejected: '不合格',
-  done: '完了',
-}
-
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<InternEvent['type'], string> = {
   deadline: '締切',
   internship: 'インターン',
   selection: '選考',
   event: 'イベント',
 }
 
-export default function CompanyDetail({ company, events, files }: Props) {
+interface Props {
+  company: Company
+  events: InternEvent[]
+  processes: SelectionProcess[]
+  files: CompanyFile[]
+}
+
+function formatDate(value: string) {
+  const date = new Date(value)
+  return date.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    ...(value.includes('T') ? { hour: '2-digit', minute: '2-digit' } : {}),
+  })
+}
+
+export default function CompanyDetail({ company, events, processes, files }: Props) {
   const router = useRouter()
-  const [notes, setNotes] = useState(company.notes)
-  const [editMode, setEditMode] = useState(false)
-  const [editValue, setEditValue] = useState(company.notes)
-  const [eventList, setEventList] = useState<InternEvent[]>(events)
-  const [eventStatuses, setEventStatuses] = useState<Record<string, Status>>(
-    Object.fromEntries(events.map(e => [e.id, e.status]))
-  )
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ title: '', type: 'deadline' as InternEvent['type'], start: '', end: '', allDay: true })
+  const [processList, setProcessList] = useState(processes)
+  const [eventList, setEventList] = useState(events)
+  const [busy, setBusy] = useState(false)
+  const [processDialogOpen, setProcessDialogOpen] = useState(false)
+  const [processForm, setProcessForm] = useState({
+    name: '',
+    kind: 'internship' as ProcessKind,
+  })
+
+  const [accountEdit, setAccountEdit] = useState(false)
   const [officialUrl, setOfficialUrl] = useState(company.url ?? '')
   const [mypageUrl, setMypageUrl] = useState(company.mypageUrl ?? '')
   const [loginId, setLoginId] = useState(company.loginId ?? '')
   const [webTestType, setWebTestType] = useState(company.webTestType ?? '')
   const [password, setPassword] = useState(company.password ?? '')
   const [showPassword, setShowPassword] = useState(false)
-  const [accountEdit, setAccountEdit] = useState(false)
   const [copiedKey, setCopiedKey] = useState<'loginId' | 'password' | null>(null)
 
-  const copyToClipboard = (text: string, key: 'loginId' | 'password') => {
-    if (!text) return
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text)
-    } else {
-      const el = document.createElement('textarea')
-      el.value = text
-      el.style.position = 'fixed'
-      el.style.opacity = '0'
-      document.body.appendChild(el)
-      el.select()
-      document.execCommand('copy')
-      document.body.removeChild(el)
+  const [notes, setNotes] = useState(company.notes)
+  const [notesDraft, setNotesDraft] = useState(company.notes)
+  const [notesEdit, setNotesEdit] = useState(false)
+
+  useEffect(() => setProcessList(processes), [processes])
+  useEffect(() => setEventList(events), [events])
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true)
+    try {
+      await action()
+      router.refresh()
+    } finally {
+      setBusy(false)
     }
+  }
+
+  const copy = async (value: string, key: 'loginId' | 'password') => {
+    if (!value) return
+    await navigator.clipboard.writeText(value)
     setCopiedKey(key)
-    setTimeout(() => setCopiedKey(prev => (prev === key ? null : prev)), 1500)
-  }
-  const [isPending, startTransition] = useTransition()
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const sortedEvents = [...eventList].sort(
-    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
-  )
-
-  const handleSaveNotes = () => {
-    startTransition(async () => {
-      await updateCompanyNotes(company.id, editValue)
-      setNotes(editValue)
-      setEditMode(false)
-    })
+    setTimeout(() => setCopiedKey(current => current === key ? null : current), 1500)
   }
 
-  const handleStatusChange = (eventId: string, status: Status) => {
-    setEventStatuses(prev => ({ ...prev, [eventId]: status }))
-    startTransition(async () => {
-      await updateEventStatus(eventId, status)
-    })
-  }
-
-  const handleDelete = (eventId: string) => {
-    setEventList(prev => prev.filter(e => e.id !== eventId))
-    startTransition(async () => {
-      await deleteEvent(eventId)
+  const handleAddProcess = () => {
+    if (!processForm.name.trim()) return
+    run(async () => {
+      await addSelectionProcess(company.id, {
+        name: processForm.name,
+        kind: processForm.kind,
+      })
+      setProcessDialogOpen(false)
+      setProcessForm({ name: '', kind: 'internship' })
     })
   }
 
   const handleDeleteCompany = () => {
-    const ok = window.confirm(`「${company.name}」を削除します。\n関連イベントとフォルダもすべて削除されます。\nよろしいですか？`)
-    if (!ok) return
-    startTransition(async () => {
+    if (!window.confirm(`「${company.name}」と関連データ、企業フォルダを削除します。よろしいですか？`)) return
+    run(async () => {
       await deleteCompany(company.id)
       router.push('/companies')
-      router.refresh()
     })
   }
 
-  const handleToggleSuspended = () => {
-    const next = !company.suspended
-    startTransition(async () => {
-      await toggleCompanySuspended(company.id, next)
-      router.refresh()
-    })
-  }
-
-  const handleEditOpen = (event: InternEvent) => {
-    setEditForm({
-      title: event.title,
-      type: event.type,
-      start: event.start,
-      end: event.end,
-      allDay: !event.start.includes('T'),
-    })
-    setEditingId(event.id)
-  }
-
-  const toDateValue = (s: string) => (s ? s.split('T')[0] : '')
-  const toDateTimeValue = (s: string) => {
-    if (!s) return ''
-    if (s.includes('T')) return s.substring(0, 16)
-    return `${s}T09:00`
-  }
-
-  const handleEditSave = (eventId: string) => {
-    setEventList(prev => prev.map(e => e.id === eventId ? { ...e, ...editForm, end: editForm.end || editForm.start } : e))
-    setEditingId(null)
-    startTransition(async () => {
-      await updateEvent(eventId, { ...editForm, end: editForm.end || editForm.start })
-    })
-  }
-
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('ja-JP', {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      ...(dateStr.includes('T') ? { hour: '2-digit', minute: '2-digit' } : {}),
-    })
-  }
-
-  const isPast = (dateStr: string) => new Date(dateStr) < today
-  const isClosedStatus = (status: Status) => status === 'done' || status === 'rejected' || status === 'passed'
-  const activeEvents = sortedEvents.filter(event => !isClosedStatus(eventStatuses[event.id] ?? event.status))
-  const completedEvents = sortedEvents.filter(event => isClosedStatus(eventStatuses[event.id] ?? event.status))
-  const overdueEvents = activeEvents.filter(event => isPast(event.start))
-  const nextDeadline = activeEvents.find(
-    event => event.type === 'deadline' && new Date(event.start) >= today
-  )
-  const nextUpcoming = activeEvents.find(event => new Date(event.start) >= today)
-
-  const renderEventRow = (event: InternEvent, muted = false) => {
-    const past = isPast(event.start)
-    const isDeadline = event.type === 'deadline'
-    const currentStatus = eventStatuses[event.id]
-    const isEditing = editingId === event.id
-
-    if (isEditing) {
-      return (
-        <div key={event.id} className="flex items-center gap-2 p-3 rounded-lg border bg-card flex-wrap">
-          <div
-            className="w-1 h-10 rounded-full flex-shrink-0"
-            style={{ backgroundColor: company.color }}
-          />
-          <Input
-            value={editForm.title}
-            onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
-            className="h-8 text-sm flex-1 min-w-[120px]"
-          />
-          <Select value={editForm.type} onValueChange={v => setEditForm(f => ({ ...f, type: v as InternEvent['type'] }))}>
-            <SelectTrigger className="h-8 text-xs w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(TYPE_LABELS).map(([val, label]) => (
-                <SelectItem key={val} value={val} className="text-xs">{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={editForm.allDay}
-              onChange={e => {
-                const allDay = e.target.checked
-                setEditForm(f => ({
-                  ...f,
-                  allDay,
-                  start: allDay ? toDateValue(f.start) : toDateTimeValue(f.start),
-                  end: allDay ? toDateValue(f.end) : toDateTimeValue(f.end),
-                }))
-              }}
-              className="h-3 w-3"
-            />
-            終日
-          </label>
-          <Input
-            type={editForm.allDay ? 'date' : 'datetime-local'}
-            value={editForm.allDay ? toDateValue(editForm.start) : toDateTimeValue(editForm.start)}
-            onChange={e => setEditForm(f => ({ ...f, start: e.target.value }))}
-            className={`h-8 text-xs ${editForm.allDay ? 'w-36' : 'w-44'}`}
-          />
-          {editForm.type !== 'deadline' && (
-            <Input
-              type={editForm.allDay ? 'date' : 'datetime-local'}
-              value={editForm.allDay ? toDateValue(editForm.end) : toDateTimeValue(editForm.end)}
-              onChange={e => setEditForm(f => ({ ...f, end: e.target.value }))}
-              className={`h-8 text-xs ${editForm.allDay ? 'w-36' : 'w-44'}`}
-            />
-          )}
-          <div className="flex gap-1 ml-auto">
-            <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} disabled={isPending}>
-              キャンセル
-            </Button>
-            <Button size="sm" onClick={() => handleEditSave(event.id)} disabled={isPending || !editForm.title || !editForm.start}>
-              保存
-            </Button>
-          </div>
-        </div>
-      )
-    }
-
-    return (
-      <div
-        key={event.id}
-        className={`flex gap-2 sm:gap-3 p-3 rounded-lg border bg-card ${muted ? 'opacity-60' : ''} ${past && !muted ? 'border-orange-200 bg-orange-50/40' : ''}`}
-      >
-        <div
-          className="w-1 rounded-full flex-shrink-0 self-stretch"
-          style={{ backgroundColor: company.color }}
-        />
-
-        <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
-          <div className="sm:w-36 sm:flex-shrink-0">
-            <div className={`text-sm font-medium ${muted ? 'text-muted-foreground line-through' : ''}`}>
-              {formatDate(event.start)}
-            </div>
-            {event.end && event.end !== event.start && !isDeadline && (
-              <div className="text-xs text-muted-foreground">
-                〜 {formatDate(event.end)}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              {isDeadline && <span className="text-sm">⚠</span>}
-              <span className="text-sm font-medium">{event.title}</span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex-shrink-0">
-                {TYPE_LABELS[event.type]}
-              </span>
-              {past && !muted && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 flex-shrink-0">
-                  期限超過
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Select
-              value={currentStatus}
-              onValueChange={(v) => handleStatusChange(event.id, v as Status)}
-              disabled={isPending}
-            >
-              <SelectTrigger className="h-8 text-xs w-full sm:w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.entries(STATUS_LABELS) as [Status, string][]).map(([val, label]) => (
-                  <SelectItem key={val} value={val} className="text-xs">
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-shrink-0 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-              onClick={() => handleEditOpen(event)}
-              disabled={isPending}
-            >
-              <Pencil className="w-4 h-4" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-shrink-0 h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-              onClick={() => handleDelete(event.id)}
-              disabled={isPending}
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const trackingState = getTrackingState(company)
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div
-          className="w-4 h-4 rounded-full flex-shrink-0"
-          style={{ backgroundColor: company.color }}
-        />
-        <h1 className="text-xl sm:text-2xl font-bold flex-1 min-w-0 truncate">{company.name}</h1>
-        {company.suspended && (
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border flex-shrink-0">
-            保留中
-          </span>
-        )}
-        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-            onClick={handleToggleSuspended}
-            disabled={isPending}
-            title={company.suspended ? '保留を解除' : '保留にする'}
-          >
-            {company.suspended ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-            onClick={handleDeleteCompany}
-            disabled={isPending}
-            title="企業を削除"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-        </div>
+    <div className="p-4 sm:p-6 max-w-6xl">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <span className="h-4 w-4 rounded-full" style={{ backgroundColor: company.color }} />
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold">{company.name}</h1>
+        <Select
+          value={trackingState}
+          onValueChange={value => run(() => updateCompanyTrackingState(company.id, value as TrackingState))}
+          disabled={busy}
+        >
+          <SelectTrigger className="w-32"><SelectValue>{TRACKING_STATE_META[trackingState].label}</SelectValue></SelectTrigger>
+          <SelectContent>
+            {(Object.entries(TRACKING_STATE_META) as [TrackingState, { label: string }][]).map(([value, meta]) => (
+              <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="ghost" size="sm" onClick={handleDeleteCompany} disabled={busy} title="企業を削除">
+          <Trash2 className="h-4 w-4 text-destructive" />
+        </Button>
       </div>
 
-      {/* Account info */}
-      <div className="mb-6 p-3 rounded-lg border bg-card">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">アカウント情報</span>
+      <section className="mb-6 rounded-lg border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">アカウント情報</h2>
+            <p className="text-xs text-muted-foreground">企業サイトとログイン情報</p>
+          </div>
           {!accountEdit ? (
-            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setAccountEdit(true)}>編集</Button>
+            <Button variant="ghost" size="sm" onClick={() => setAccountEdit(true)}>
+              <Pencil className="mr-1 h-3.5 w-3.5" />編集
+            </Button>
           ) : (
             <div className="flex gap-1">
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setAccountEdit(false)} disabled={isPending}>キャンセル</Button>
-              <Button size="sm" className="h-6 text-xs" disabled={isPending} onClick={() => {
-                startTransition(async () => {
+              <Button variant="ghost" size="sm" onClick={() => setAccountEdit(false)} disabled={busy}>キャンセル</Button>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => run(async () => {
                   await updateCompanyAccount(company.id, mypageUrl, loginId, officialUrl, webTestType, password)
                   setAccountEdit(false)
-                })
-              }}>保存</Button>
+                })}
+              >
+                保存
+              </Button>
             </div>
           )}
         </div>
+
         {accountEdit ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-20 flex-shrink-0">公式サイト</span>
-              <Input value={officialUrl} onChange={e => setOfficialUrl(e.target.value)} className="h-7 text-xs" placeholder="https://..." />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-20 flex-shrink-0">マイページURL</span>
-              <Input value={mypageUrl} onChange={e => setMypageUrl(e.target.value)} className="h-7 text-xs" placeholder="https://..." />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-20 flex-shrink-0">ログインID</span>
-              <Input value={loginId} onChange={e => setLoginId(e.target.value)} className="h-7 text-xs" placeholder="メールアドレスなど" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-20 flex-shrink-0">Webテスト</span>
-              <Input value={webTestType} onChange={e => setWebTestType(e.target.value)} className="h-7 text-xs" placeholder="SPI・玉手箱・TG-WEBなど" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground w-20 flex-shrink-0">パスワード</span>
-              <Input value={password} onChange={e => setPassword(e.target.value)} className="h-7 text-xs" placeholder="マイページパスワード" />
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div><Label>マイページURL</Label><Input value={mypageUrl} onChange={event => setMypageUrl(event.target.value)} /></div>
+            <div><Label>公式サイトURL</Label><Input value={officialUrl} onChange={event => setOfficialUrl(event.target.value)} /></div>
+            <div><Label>ログインID</Label><Input value={loginId} onChange={event => setLoginId(event.target.value)} /></div>
+            <div><Label>パスワード</Label><Input value={password} onChange={event => setPassword(event.target.value)} /></div>
+            <div className="sm:col-span-2"><Label>Webテスト種別</Label><Input value={webTestType} onChange={event => setWebTestType(event.target.value)} /></div>
           </div>
         ) : (
-          <div className="space-y-3 text-xs">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {mypageUrl ? (
-                <a
-                  href={mypageUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-transparent bg-primary px-2.5 text-[0.8rem] font-medium text-primary-foreground transition-colors hover:bg-primary/80"
-                >
-                  マイページ
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              ) : (
-                <Button size="sm" className="h-8" variant="outline" disabled>マイページ未設定</Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8"
-                onClick={() => copyToClipboard(loginId, 'loginId')}
-                disabled={!loginId}
-              >
-                {copiedKey === 'loginId' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                ID
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8"
-                onClick={() => copyToClipboard(password, 'password')}
-                disabled={!password}
-              >
-                {copiedKey === 'password' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                PW
-              </Button>
-              {officialUrl ? (
-                <a
-                  href={officialUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-background px-2.5 text-[0.8rem] font-medium transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  公式サイト
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              ) : (
-                <Button size="sm" className="h-8" variant="outline" disabled>公式サイト未設定</Button>
-              )}
-            </div>
-            <details className="group rounded-lg border bg-muted/25 px-3 py-2">
-              <summary className="flex cursor-pointer select-none items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground">
-                <span className="inline-block transition-transform group-open:rotate-90">▶</span>
-                詳細情報
-              </summary>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">ログインID</div>
-                  <div className="mt-0.5 truncate font-mono text-foreground">
-                    {loginId || <span className="font-sans text-muted-foreground italic">未設定</span>}
+          <div className="grid gap-2 sm:grid-cols-4">
+            {mypageUrl ? (
+              <a href={mypageUrl} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-1 rounded-md bg-primary px-3 text-sm text-primary-foreground">
+                マイページ <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : <Button variant="outline" disabled>マイページ未設定</Button>}
+            <Button variant="outline" onClick={() => copy(loginId, 'loginId')} disabled={!loginId}>
+              {copiedKey === 'loginId' ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}ID
+            </Button>
+            <Button variant="outline" onClick={() => copy(password, 'password')} disabled={!password}>
+              {copiedKey === 'password' ? <Check className="mr-1 h-4 w-4" /> : <Copy className="mr-1 h-4 w-4" />}PW
+            </Button>
+            {officialUrl ? (
+              <a href={officialUrl} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center justify-center gap-1 rounded-md border px-3 text-sm">
+                公式サイト <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : <Button variant="outline" disabled>公式サイト未設定</Button>}
+            {(loginId || password || webTestType) && (
+              <div className="sm:col-span-4 rounded-md bg-muted/40 p-3 text-xs">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div><span className="text-muted-foreground">ID</span><div className="font-mono">{loginId || '—'}</div></div>
+                  <div>
+                    <span className="text-muted-foreground">パスワード</span>
+                    <div className="flex items-center gap-2 font-mono">
+                      {password ? (showPassword ? password : '••••••••') : '—'}
+                      {password && (
+                        <button onClick={() => setShowPassword(value => !value)} title={showPassword ? '隠す' : '表示'}>
+                          {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Webテスト</div>
-                  <div className="mt-0.5 truncate font-medium text-foreground">
-                    {webTestType || <span className="font-normal text-muted-foreground italic">未設定</span>}
-                  </div>
-                </div>
-                <div className="min-w-0 sm:col-span-2">
-                  <div className="text-muted-foreground">パスワード</div>
-                  <div className="mt-0.5 flex items-center gap-2">
-                    <span className="min-w-0 truncate font-mono text-foreground">
-                      {password ? (showPassword ? password : '••••••••') : <span className="font-sans text-muted-foreground italic">未設定</span>}
-                    </span>
-                    {password && (
-                      <button
-                        onClick={() => setShowPassword(v => !v)}
-                        title={showPassword ? '隠す' : '表示'}
-                        className="text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    )}
-                  </div>
+                  <div><span className="text-muted-foreground">Webテスト</span><div>{webTestType || '—'}</div></div>
                 </div>
               </div>
-            </details>
+            )}
           </div>
         )}
-      </div>
+      </section>
 
-      <Tabs defaultValue="events">
-        <TabsList className="mb-4">
-          <TabsTrigger value="events">イベント</TabsTrigger>
+      <Tabs defaultValue="processes">
+        <TabsList>
+          <TabsTrigger value="processes">選考プロセス ({processList.length})</TabsTrigger>
+          <TabsTrigger value="events">予定 ({eventList.length})</TabsTrigger>
           <TabsTrigger value="notes">メモ</TabsTrigger>
-          <TabsTrigger value="files">ファイル {files.length > 0 && `(${files.length})`}</TabsTrigger>
+          <TabsTrigger value="files">ファイル ({files.length})</TabsTrigger>
         </TabsList>
 
-        {/* Events Tab */}
-        <TabsContent value="events">
-          <div className="space-y-5">
-            {sortedEvents.length === 0 && (
-              <p className="text-muted-foreground text-sm">イベントがありません</p>
-            )}
-
-            {sortedEvents.length > 0 && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <div className="rounded-lg border bg-card p-3">
-                  <div className="text-xs text-muted-foreground">次の締切</div>
-                  <div className="mt-1 text-sm font-semibold">
-                    {nextDeadline ? formatDate(nextDeadline.start) : 'なし'}
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {nextDeadline?.title ?? '未対応の締切はありません'}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                  <div className="text-xs text-muted-foreground">未完了</div>
-                  <div className="mt-1 text-sm font-semibold">
-                    {activeEvents.length}件
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {overdueEvents.length > 0 ? `期限超過 ${overdueEvents.length}件` : '期限超過なし'}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-card p-3">
-                  <div className="text-xs text-muted-foreground">直近予定</div>
-                  <div className="mt-1 text-sm font-semibold">
-                    {nextUpcoming ? formatDate(nextUpcoming.start) : 'なし'}
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {nextUpcoming?.title ?? '今後の予定はありません'}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeEvents.length > 0 && (
-              <section className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold">未完了・進行中</h2>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {activeEvents.length}件
-                  </span>
-                </div>
-                {activeEvents.map(event => renderEventRow(event))}
-              </section>
-            )}
-
-            {completedEvents.length > 0 && (
-              <details className="group">
-                <summary className="flex cursor-pointer select-none items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-                  <span className="inline-block transition-transform group-open:rotate-90">▶</span>
-                  <span className="font-medium">完了済み・終了</span>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{completedEvents.length}件</span>
-                </summary>
-                <div className="mt-2 space-y-2">
-                  {completedEvents.map(event => renderEventRow(event, true))}
-                </div>
-              </details>
-            )}
+        <TabsContent value="processes" className="mt-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-semibold">選考プロセス</h2>
+              <p className="text-xs text-muted-foreground">会社ごとに自由なフローを作成し、主プロセスを1つ指定します。</p>
+            </div>
+            <Button size="sm" onClick={() => setProcessDialogOpen(true)}>＋ プロセスを追加</Button>
           </div>
+          {processList.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+              選考プロセスがありません。「プロセスを追加」から登録してください。
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {processList.map(process => (
+                <ProcessCard
+                  key={process.id}
+                  company={company}
+                  process={process}
+                  allProcesses={processList}
+                  busy={busy}
+                  run={run}
+                />
+              ))}
+            </div>
+          )}
         </TabsContent>
 
-        {/* Notes Tab */}
-        <TabsContent value="notes">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground">メモ</h2>
-              {!editMode ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEditValue(notes)
-                    setEditMode(true)
-                  }}
-                >
-                  編集
-                </Button>
-              ) : (
-                <div className="flex gap-2">
+        <TabsContent value="events" className="mt-4">
+          <div className="mb-3">
+            <h2 className="font-semibold">カレンダー予定</h2>
+            <p className="text-xs text-muted-foreground">予定の状態だけを管理します。選考結果はプロセス・ステップ側で管理します。</p>
+          </div>
+          <div className="space-y-2">
+            {eventList.map(event => {
+              const process = processList.find(item => item.id === event.processId)
+              const step = process?.steps.find(item => item.id === event.stepId)
+              return (
+                <div key={event.id} className="flex flex-col gap-2 rounded-lg border bg-card p-3 sm:flex-row sm:items-center">
+                  <div className="sm:w-44">
+                    <div className="text-sm font-medium">{formatDate(event.start)}</div>
+                    {event.end !== event.start && <div className="text-xs text-muted-foreground">〜 {formatDate(event.end)}</div>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{event.title}</span>
+                      <Badge variant="outline">{TYPE_LABELS[event.type]}</Badge>
+                    </div>
+                    {(process || step) && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {process?.name}{step ? ` / ${step.label}` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <Select
+                    value={event.state}
+                    onValueChange={value => {
+                      const state = value as CalendarItemState
+                      setEventList(current => current.map(item => item.id === event.id ? { ...item, state } : item))
+                      run(() => updateEventState(event.id, state))
+                    }}
+                    disabled={busy}
+                  >
+                    <SelectTrigger className="w-full sm:w-28"><SelectValue>{CALENDAR_STATE_META[event.state].label}</SelectValue></SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(CALENDAR_STATE_META) as [CalendarItemState, { label: string }][]).map(([value, meta]) => (
+                        <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setEditMode(false)}
-                    disabled={isPending}
+                    disabled={busy}
+                    onClick={() => {
+                      if (!window.confirm(`予定「${event.title}」を削除しますか？`)) return
+                      setEventList(current => current.filter(item => item.id !== event.id))
+                      run(() => deleteEvent(event.id))
+                    }}
                   >
-                    キャンセル
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveNotes}
-                    disabled={isPending}
-                  >
-                    {isPending ? '保存中...' : '保存'}
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              )}
-            </div>
-
-            {editMode ? (
-              <Textarea
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                className="min-h-64 font-mono text-sm"
-                placeholder="Markdownで記入..."
-              />
-            ) : (
-              <div className="prose prose-sm max-w-none border rounded-lg p-4 bg-card min-h-32">
-                {notes ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{notes}</ReactMarkdown>
-                ) : (
-                  <p className="text-muted-foreground italic">メモなし</p>
-                )}
-              </div>
-            )}
+              )
+            })}
           </div>
         </TabsContent>
 
-        {/* Files Tab */}
-        <TabsContent value="files">
-          {files.length === 0 ? (
-            <p className="text-sm text-muted-foreground">ファイルがありません</p>
+        <TabsContent value="notes" className="mt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">企業メモ</h2>
+            {!notesEdit && <Button variant="outline" size="sm" onClick={() => setNotesEdit(true)}>編集</Button>}
+          </div>
+          {notesEdit ? (
+            <div className="space-y-3">
+              <Textarea value={notesDraft} onChange={event => setNotesDraft(event.target.value)} className="min-h-96 font-mono" />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => { setNotesDraft(notes); setNotesEdit(false) }}>キャンセル</Button>
+                <Button onClick={() => run(async () => { await updateCompanyNotes(company.id, notesDraft); setNotes(notesDraft); setNotesEdit(false) })}>保存</Button>
+              </div>
+            </div>
           ) : (
-            <ul className="space-y-2">
-              {files.map(f => (
-                <li key={f.name} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                  <span className="text-lg flex-shrink-0">{FILE_ICONS[f.ext] ?? '📎'}</span>
-                  <span className="flex-1 text-sm font-medium truncate">{f.name}</span>
-                  <a
-                    href={`/api/open?path=${encodeURIComponent(f.relativePath)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-shrink-0"
-                  >
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                    >
-                      開く
-                    </Button>
-                  </a>
-                </li>
-              ))}
-            </ul>
+            <div className="prose prose-sm max-w-none rounded-lg border bg-card p-5">
+              {notes ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{notes}</ReactMarkdown> : <p className="text-muted-foreground">メモはありません。</p>}
+            </div>
           )}
         </TabsContent>
+
+        <TabsContent value="files" className="mt-4">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {files.map(file => (
+              <a
+                key={file.relativePath}
+                href={`/api/open?path=${encodeURIComponent(file.relativePath)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-lg border bg-card p-3 hover:bg-accent/40"
+              >
+                <span className="text-xl">{FILE_ICONS[file.ext] ?? '📎'}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
+                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+              </a>
+            ))}
+            {files.length === 0 && <p className="text-sm text-muted-foreground">ファイルはありません。</p>}
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={processDialogOpen} onOpenChange={setProcessDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>選考プロセスを追加</DialogTitle>
+            <DialogDescription>サマーインターン、早期選考、本選考などを個別に管理します。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div><Label>名称</Label><Input value={processForm.name} onChange={event => setProcessForm(form => ({ ...form, name: event.target.value }))} placeholder="例：早期選考" /></div>
+            <div>
+              <Label>種類</Label>
+              <Select value={processForm.kind} onValueChange={value => setProcessForm(form => ({ ...form, kind: value as ProcessKind }))}>
+                <SelectTrigger><SelectValue>{PROCESS_KIND_META[processForm.kind].label}</SelectValue></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(PROCESS_KIND_META) as [ProcessKind, { label: string }][]).map(([value, meta]) => (
+                    <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setProcessDialogOpen(false)}>キャンセル</Button>
+              <Button onClick={handleAddProcess} disabled={!processForm.name.trim() || busy}>追加</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+  )
+}
+
+function ProcessCard({
+  company,
+  process,
+  allProcesses,
+  busy,
+  run,
+}: {
+  company: Company
+  process: SelectionProcess
+  allProcesses: SelectionProcess[]
+  busy: boolean
+  run: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [name, setName] = useState(process.name)
+  const [kind, setKind] = useState(process.kind)
+  const [status, setStatus] = useState(process.status)
+  const [result, setResult] = useState(process.result)
+  const [stepLabel, setStepLabel] = useState('')
+  const [stepKind, setStepKind] = useState<StepKind>('other')
+
+  useEffect(() => {
+    setName(process.name)
+    setKind(process.kind)
+    setStatus(process.status)
+    setResult(process.result)
+  }, [process])
+
+  const isPrimary = company.primaryProcessId === process.id
+  const sortedSteps = [...process.steps].sort((a, b) => a.order - b.order)
+
+  return (
+    <section className={`rounded-lg border bg-card ${isPrimary ? 'ring-2 ring-primary/30' : ''}`}>
+      <div className="border-b p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {isPrimary && <Badge><Star className="mr-1 h-3 w-3 fill-current" />主プロセス</Badge>}
+          <Input value={name} onChange={event => setName(event.target.value)} className="min-w-48 flex-1 font-semibold" />
+          {!isPrimary && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => setPrimaryProcess(company.id, process.id))}>
+              <Star className="mr-1 h-3.5 w-3.5" />主に設定
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm(`プロセス「${process.name}」を削除しますか？予定は削除されません。`)) return
+              run(() => deleteSelectionProcess(process.id))
+            }}
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-4">
+          <Select value={kind} onValueChange={value => setKind(value as ProcessKind)}>
+            <SelectTrigger><SelectValue>{PROCESS_KIND_META[kind].label}</SelectValue></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(PROCESS_KIND_META) as [ProcessKind, { label: string }][]).map(([value, meta]) => (
+                <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={status} onValueChange={value => setStatus(value as ProcessStatus)}>
+            <SelectTrigger><SelectValue>{PROCESS_STATUS_META[status].label}</SelectValue></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(PROCESS_STATUS_META) as [ProcessStatus, { label: string }][]).map(([value, meta]) => (
+                <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={result} onValueChange={value => setResult(value as ProcessResult)}>
+            <SelectTrigger><SelectValue>{PROCESS_RESULT_META[result].label}</SelectValue></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(PROCESS_RESULT_META) as [ProcessResult, { label: string }][]).map(([value, meta]) => (
+                <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            disabled={busy || !name.trim()}
+            onClick={() => run(() => updateSelectionProcess(process.id, { name, kind, status, result }))}
+          >
+            プロセスを保存
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">選考ステップ</h3>
+          <span className="text-xs text-muted-foreground">{sortedSteps.length}ステップ</span>
+        </div>
+        {sortedSteps.length === 0 ? (
+          <div className="mb-3 rounded-md border border-dashed p-5 text-center text-sm text-muted-foreground">
+            ステップを追加してください。
+          </div>
+        ) : (
+          <div className="mb-4 space-y-2">
+            {sortedSteps.map((step, index) => {
+              const current = process.currentStepId === step.id
+              return (
+                <div key={step.id} className={`rounded-lg border p-3 ${current ? 'border-primary bg-primary/5' : ''}`}>
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs">{index + 1}</span>
+                    <span className="min-w-32 flex-1 font-medium">{step.label}</span>
+                    {current && <Badge>現在</Badge>}
+                    {!current && (
+                      <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => setCurrentStep(process.id, step.id))}>
+                        現在に設定
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" disabled={busy || index === 0} onClick={() => run(() => reorderSelectionStep(process.id, step.id, 'up'))}>
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={busy || index === sortedSteps.length - 1} onClick={() => run(() => reorderSelectionStep(process.id, step.id, 'down'))}>
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(`ステップ「${step.label}」を削除しますか？`)) return
+                        run(() => deleteSelectionStep(process.id, step.id))
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <Select
+                      value={step.kind}
+                      onValueChange={value => run(() => updateSelectionStep(process.id, step.id, { kind: value as StepKind }))}
+                    >
+                      <SelectTrigger><SelectValue>{STEP_KIND_META[step.kind].label}</SelectValue></SelectTrigger>
+                      <SelectContent>
+                        {(Object.entries(STEP_KIND_META) as [StepKind, { label: string }][]).map(([value, meta]) => (
+                          <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={step.state}
+                      onValueChange={value => run(() => updateSelectionStep(process.id, step.id, { state: value as StepState }))}
+                    >
+                      <SelectTrigger><SelectValue>{STEP_STATE_META[step.state].label}</SelectValue></SelectTrigger>
+                      <SelectContent>
+                        {(Object.entries(STEP_STATE_META) as [StepState, { label: string }][]).map(([value, meta]) => (
+                          <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={step.result}
+                      onValueChange={value => run(() => updateSelectionStep(process.id, step.id, { result: value as StepResult }))}
+                    >
+                      <SelectTrigger><SelectValue>{STEP_RESULT_META[step.result].label}</SelectValue></SelectTrigger>
+                      <SelectContent>
+                        {(Object.entries(STEP_RESULT_META) as [StepResult, { label: string }][]).map(([value, meta]) => (
+                          <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {allProcesses.length > 1 ? (
+                      <Select
+                        value={process.id}
+                        onValueChange={value => run(() => moveSelectionStep(company.id, process.id, step.id, value as string))}
+                      >
+                        <SelectTrigger><SelectValue>{process.name}</SelectValue></SelectTrigger>
+                        <SelectContent>
+                          {allProcesses.map(target => (
+                            <SelectItem key={target.id} value={target.id}>{target.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : <div className="flex items-center px-2 text-xs text-muted-foreground">移動先なし</div>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_180px_auto]">
+          <Input value={stepLabel} onChange={event => setStepLabel(event.target.value)} placeholder="新しいステップ名（例：一次面接）" />
+          <Select value={stepKind} onValueChange={value => setStepKind(value as StepKind)}>
+            <SelectTrigger><SelectValue>{STEP_KIND_META[stepKind].label}</SelectValue></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(STEP_KIND_META) as [StepKind, { label: string }][]).map(([value, meta]) => (
+                <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            disabled={busy || !stepLabel.trim()}
+            onClick={() => run(async () => {
+              await addSelectionStep(process.id, { label: stepLabel, kind: stepKind })
+              setStepLabel('')
+              setStepKind('other')
+            })}
+          >
+            ステップ追加
+          </Button>
+        </div>
+      </div>
+    </section>
   )
 }
